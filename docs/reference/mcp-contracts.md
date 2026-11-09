@@ -1996,6 +1996,26 @@ check full-profile local-path rules. Compact MCP workflow tests verify canonical
 rejection of invalid inputs before provider work, independent of how much detail
 the selected advertisement retains.
 
+### Retained-view guidance
+
+`inspect_analysis_view` advertises the shared source, Evidence and paging rules.
+Its format-specific selectors are available on demand through the existing
+guidance tools: search with `{"query":"inspect_analysis_view <format or view kind>"}`,
+then pass a returned locator to `read_guidance_section`. For example, search for
+`inspect_analysis_view OpenAPI` before selecting retained API operations.
+These compiled tool sections ship in the runtime alongside the installed workflow
+guides; they use the same bundle digest, section selection and stale-locator checks.
+They are documentation, not target observations or Evidence. CLI callers use
+`rea guidance --action search --query "inspect_analysis_view OpenAPI"`, then
+`rea guidance --action read --locator <locator>` through the same owner.
+
+In hot/cold catalogs, first discover `search_guidance` and `read_guidance_section`
+by their exact names. Keyword tool discovery also searches the compiled tool
+guidance, so moving a selector out of the advertised description does not remove
+its tool-discovery keywords. Full input/output schemas and canonical validation
+remain unchanged; a full-catalog client does not need catalog refresh to use the
+guidance tools.
+
 <a id="hotcold-catalog-discovery"></a>
 
 ### Hot/cold catalog discovery
@@ -2004,6 +2024,13 @@ the selected advertisement retains.
 clients that refresh `tools/list` after `notifications/tools/list_changed`.
 The default, `full`, retains the complete upfront advertisement. Restart the
 server to change profiles. See [client configuration](../getting-started/client-configuration.md#hotcold-catalogs).
+
+Legacy connections receive list-change notifications unsolicited. On protocol
+revision `2026-07-28`, subscribe to tool-list changes with `subscriptions/listen`;
+the pinned JS SDK exposes `client.listen({toolsListChanged: true})` or the
+`ClientOptions.listChanged.tools` convenience handler. Registering a notification
+handler alone does not open a modern subscription. Refresh `tools/list` after
+the subscribed notification before calling newly loaded tools.
 
 Hot/cold initially advertises `binary_session`, `open_binary`, `close_binary`,
 `get_evidence_bundle`, and the adapter's `discover_tools`.
@@ -2014,7 +2041,7 @@ that accept `view` can answer a selected first question without loading the
 cross-domain view contract. Complete output schemas and canonical result
 validation are preserved when each tool loads.
 An explicit tool-family scope can remove any of those domain tools.
-`discover_tools` searches canonical names and descriptions using case-insensitive
+`discover_tools` searches canonical names, descriptions and compiled tool guidance using case-insensitive
 words, or accepts exact `names`. It loads the matching page and returns names
 and abbreviated descriptions with their configured input schemas, so the next
 call can use the returned arguments contract. Output schemas remain in
