@@ -14,11 +14,12 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 import {
+  MANAGED_SKILL_FILES,
   canonicalSkillNeedsInstall,
   existingSkillDestinations,
   installCanonicalSkill,
@@ -595,22 +596,15 @@ describe("canonical skill transaction", () => {
     expect(await readFile(`${nativeGuide}.rea.backup`, "utf8")).toBe(
       "stale filesystem-write permission grant\n",
     );
-    for (const reference of [
-      "connection-and-recovery.md",
-      "native-and-artifacts.md",
-      "javascript-applications.md",
-      "android-applications.md",
-      "runtime-observation.md",
-      "evidence-workflows.md",
-    ]) {
+    for (const relativePath of MANAGED_SKILL_FILES) {
       const installed = await readFile(
-        join(dirname(destination), "references", reference),
+        join(dirname(destination), relativePath),
         "utf8",
       );
       expect(installed).toBe(
         await readFile(
           new URL(
-            `../../../skills/reverse-engineer-anything/references/${reference}`,
+            `../../../skills/reverse-engineer-anything/${relativePath}`,
             import.meta.url,
           ),
           "utf8",
@@ -641,6 +635,15 @@ describe("canonical skill transaction", () => {
       ok: true,
       value: "unchanged",
     });
+    const packagedRoot = new URL(
+      "../../../skills/reverse-engineer-anything/",
+      import.meta.url,
+    );
+    const packagedPaths = (await readdir(packagedRoot, { recursive: true }))
+      .filter((path) => path.endsWith(".md"))
+      .map((path) => path.split(sep).join("/"))
+      .sort();
+    expect(packagedPaths).toEqual([...MANAGED_SKILL_FILES].sort());
     expect(await skillReferenceIssues(dirname(destination))).toEqual([]);
   });
 
@@ -650,17 +653,7 @@ describe("canonical skill transaction", () => {
       ok: true,
       value: "installed",
     });
-    const paths = [
-      "SKILL.md",
-      "references/android-applications.md",
-      "references/connection-and-recovery.md",
-      "references/desktop-build.md",
-      "references/environments.md",
-      "references/evidence-workflows.md",
-      "references/javascript-applications.md",
-      "references/native-and-artifacts.md",
-      "references/runtime-observation.md",
-    ];
+    const paths = [...MANAGED_SKILL_FILES].sort();
     const records = await Promise.all(
       paths.map(async (path) => {
         const bytes = await readFile(
