@@ -40,6 +40,8 @@ const inspectionSchema = z.strictObject({
   protocolStdin: z.boolean().optional(),
   /** Absent from artifacts built before owned Job Object commit limits. */
   jobMemoryLimit: z.literal(true).optional(),
+  /** Absent from artifacts built before transient private-runtime writes. */
+  runtimeWriteTransient: z.literal(true).optional(),
 });
 
 type NativeCall = (
@@ -85,8 +87,11 @@ export interface WindowsNativeLoadHost {
   loadArtifact(): unknown;
 }
 
+/** Shared recovery guidance for missing or incompatible native artifacts. */
+export const WINDOWS_NATIVE_ARTIFACT_REMEDIATION = `Use the matching Windows x64 REA package. Restore both native/windows/build/manifest.json and native/windows/build/rea-windows-x64.node from the rea-agents@${PACKAGE_METADATA.version} tarball only when this checkout matches that published release's native contract. Matching package version alone is insufficient; otherwise build them from this exact source checkout using native/windows/README.md. The loader checks version, ABI, architecture, and digest before granting authority; no download or install is performed automatically.`;
+
 const missingWindowsNativeFileReason = (file: string): string =>
-  `Missing packaged Windows native file native/windows/build/${file} (ENOENT). Restore both native/windows/build/manifest.json and native/windows/build/rea-windows-x64.node from the rea-agents@${PACKAGE_METADATA.version} tarball or build them with native/windows/README.md; no native artifact was loaded.`;
+  `Missing packaged Windows native file native/windows/build/${file} (ENOENT). ${WINDOWS_NATIVE_ARTIFACT_REMEDIATION} No native artifact was loaded.`;
 
 /** Recovery when Windows refuses to load the verified artifact, for example by code-integrity policy. */
 export const WINDOWS_NATIVE_LOAD_REFUSED_REMEDIATION =

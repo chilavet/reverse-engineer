@@ -7,12 +7,14 @@ import { inspectWindowsNativeReadiness } from "../process/WindowsAuthority.js";
 import {
   loadWindowsNativeAuthority,
   type WindowsNativeLoadHost,
+  WINDOWS_NATIVE_ARTIFACT_REMEDIATION,
 } from "./WindowsNativeLoader.js";
 
 const fixture = (
   capabilities: {
     protocolStdin?: boolean;
     jobMemoryLimit?: unknown;
+    runtimeWriteTransient?: unknown;
     privateBridgeDescriptorAccess?: unknown;
   } = {},
 ) => {
@@ -87,6 +89,94 @@ describe("packaged Windows native compatibility", () => {
         .available,
     ).toBe(false);
   });
+  it("admits an affirmative transient-write capability alongside existing controls", () => {
+    expect(
+      loadWindowsNativeAuthority(
+        fixture({
+          runtimeWriteTransient: true,
+          protocolStdin: true,
+          jobMemoryLimit: true,
+        }).host,
+      ),
+    ).toMatchObject({
+      available: true,
+      authority: {
+        inspection: {
+          runtimeWriteTransient: true,
+          protocolStdin: true,
+          jobMemoryLimit: true,
+          atomicJobAssignment: true,
+          killOnOwnerClose: true,
+        },
+      },
+    });
+  });
+  it("keeps earlier artifacts admitted without claiming transient writes", () => {
+    const earlier = loadWindowsNativeAuthority(
+      fixture({ protocolStdin: true }).host,
+    );
+    if (!earlier.available) throw new Error(earlier.reason);
+    expect(earlier.authority.inspection.runtimeWriteTransient).toBeUndefined();
+    expect(earlier.authority.inspection).toMatchObject({
+      protocolStdin: true,
+      privateDacl: true,
+      atomicJobAssignment: true,
+      killOnOwnerClose: true,
+    });
+  });
+  it.each([false, "true", 1, null])(
+    "refuses a nonaffirmative transient-write inspection value %j",
+    (runtimeWriteTransient) => {
+      expect(
+        loadWindowsNativeAuthority(fixture({ runtimeWriteTransient }).host),
+      ).toMatchObject({
+        available: false,
+        failureStage: "inspection",
+        reason: expect.stringContaining("runtimeWriteTransient"),
+      });
+    },
+  );
+  it("does not present matching package version as sufficient source recovery", () => {
+    const value = fixture();
+    const result = loadWindowsNativeAuthority({
+      ...value.host,
+      readManifest: () => {
+        throw Object.assign(new Error("file absent"), { code: "ENOENT" });
+      },
+    });
+    expect(result).toMatchObject({
+      available: false,
+      failureStage: "artifact",
+      reason: expect.stringContaining(
+        "Matching package version alone is insufficient",
+      ),
+    });
+    expect(result).toMatchObject({
+      reason: expect.stringContaining("from this exact source checkout"),
+    });
+    expect(value.loads()).toBe(0);
+  });
+});
+
+describe("shared native artifact recovery guidance", () => {
+  it("is exported and contains key recovery phrases", () => {
+    expect(typeof WINDOWS_NATIVE_ARTIFACT_REMEDIATION).toBe("string");
+    expect(WINDOWS_NATIVE_ARTIFACT_REMEDIATION).toContain(
+      "Matching package version alone is insufficient",
+    );
+    expect(WINDOWS_NATIVE_ARTIFACT_REMEDIATION).toContain(
+      "from this exact source checkout",
+    );
+    expect(WINDOWS_NATIVE_ARTIFACT_REMEDIATION).toContain(
+      "native/windows/README.md",
+    );
+    expect(WINDOWS_NATIVE_ARTIFACT_REMEDIATION).toContain(
+      "no download or install is performed automatically",
+    );
+  });
+});
+
+describe("packaged Windows native artifact validation", () => {
   it("loads only after compatibility and digest checks, preserving producer identity", () => {
     const value = fixture();
     expect(loadWindowsNativeAuthority(value.host)).toMatchObject({
