@@ -749,7 +749,7 @@ on `mcpServers.rea.env` in that host's MCP config. If an explicit `full`
 override is set, remove it or set it to `compact`, then restart the host and
 confirm that compact recovers the request. The host name alone does not
 identify the downstream model; see the compact profile section in
-[mcp-contracts.md](mcp-contracts.md).
+[mcp-contracts.md](../reference/mcp-contracts.md#compact-input-schema-profile).
 
 ## ZCode
 
