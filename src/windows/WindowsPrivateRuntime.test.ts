@@ -430,7 +430,14 @@ it.each(["valid", "oversized"] as const)(
           value: { host: "127.0.0.1", port: 65535 },
         });
       else {
-        expect(result.ok).toBe(false);
+        expect(result).toMatchObject({
+          ok: false,
+          error: {
+            kind: "start",
+            message: "Ghidra TCP endpoint is invalid",
+            cause: { reason: "limit" },
+          },
+        });
         expect(operations).not.toContain("read");
       }
       expect(operations).toContain("close");
@@ -451,9 +458,11 @@ it("seals runtime admission as cleanup begins", async () => {
   });
   const runtime = WindowsPrivateRuntime.create("C:\\", "rea-");
   const closing = runtime.close();
+  expect(() => runtime.writeFile("after-close.txt", "forbidden")).toThrow();
   expect(() => runtime.readFile("endpoint", 64)).toThrow();
   await expect(runtime.snapshot("C:\\input", "snapshot")).rejects.toThrow();
   expect(operations).not.toContain("runtime_open");
+  expect(operations).not.toContain("runtime_write");
   expect(operations).not.toContain("runtime_snapshot");
   await closing;
 });
