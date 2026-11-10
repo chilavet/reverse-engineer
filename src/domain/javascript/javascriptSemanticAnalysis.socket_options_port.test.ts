@@ -152,3 +152,27 @@ it("keeps the acquisition for a wrapped stream", () => {
     acquisitionsFor(`tls.connect({ socket: new net.Socket(), port: -1 })`),
   ).toHaveLength(1);
 });
+
+it.each([
+  // A `typeof` result is a nonempty string, and Node reads a positional string as a path.
+  [`net.connect(typeof missing)`],
+  [`tls.connect(typeof missing)`],
+  [`net.connect(typeof 1)`],
+  // A setter inherited through `__proto__` runs during the merge.
+  [
+    `tls.connect({ __proto__: { set port(_) { this.path = "/tmp/x"; } } }, { path: null, port: -1 })`,
+  ],
+] as const)(
+  "keeps the acquisition for a positional string or inherited setter: %s",
+  (call) => {
+    expect(acquisitionsFor(call)).toHaveLength(1);
+  },
+);
+
+it.each([
+  // The same value inside `port` is judged as a port, not as a path.
+  [`net.connect({ port: typeof missing })`],
+  [`tls.connect({ __proto__: {} }, { path: null, port: -1 })`],
+] as const)("emits no acquisition when the port decides: %s", (call) => {
+  expect(acquisitionsFor(call)).toEqual([]);
+});

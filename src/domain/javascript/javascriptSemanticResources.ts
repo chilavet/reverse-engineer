@@ -818,11 +818,25 @@ const wrapsSuppliedSocket = (
   return true;
 };
 
-/** Whether an options object carries a setter `Object.assign` invokes on the merge target. */
+/**
+ * Whether an options object carries a setter `Object.assign` invokes on the merge target.
+ *
+ * A setter can also arrive through `__proto__` in the same literal. Measured on Node
+ * 24.22.1, `tls.connect({__proto__: {set port(_) { this.path = "/tmp/x"; }}},
+ * {path: null, port: -1})` connects while the same call with an empty `__proto__` throws
+ * `ERR_SOCKET_BAD_PORT`.
+ */
 const hasOptionSetter = (options: t.ObjectExpression): boolean =>
-  options.properties.some(
-    (property) => t.isObjectMethod(property) && property.kind === "set",
-  );
+  options.properties.some((property) => {
+    if (t.isObjectMethod(property)) return property.kind === "set";
+    if (!t.isObjectProperty(property)) return false;
+    if (
+      semanticStaticPropertyKey(property.key, property.computed) !== "__proto__"
+    )
+      return false;
+    const value = unwrapJavaScriptExpression(property.value).node;
+    return t.isObjectExpression(value) && hasOptionSetter(value);
+  });
 
 /**
  * Whether a single options object provably throws before a socket exists.
@@ -959,6 +973,10 @@ const rejectsSocketPortLiteral = (
       ? false
       : optionsPortRejects(target, context, specifier);
   }
+  // A `typeof` result is always a nonempty string, and Node reads a positional string as a
+  // pipe/Unix path rather than a port. Measured on Node 24.22.1, `net.connect(typeof missing)`
+  // connects while `{port: typeof missing}` throws ERR_SOCKET_BAD_PORT.
+  if (t.isUnaryExpression(value, { operator: "typeof" })) return false;
   // A string in the positional slot is a Unix path, not a port, so only an empty one can
   // fail here: measured on Node 24.22.1, `tls.connect("/tmp/x.sock")` connects while
   // `net.connect("")` throws.
