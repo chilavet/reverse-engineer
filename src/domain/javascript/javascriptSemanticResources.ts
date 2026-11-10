@@ -618,6 +618,20 @@ const rejectsPortValue = (
   )
     return true;
   if (t.isNumericLiteral(value)) return !isUsablePortNumber(value.value);
+  // A known non-number, non-string value is a type error rather than an unknown one.
+  // Measured on Node 24.22.1, `net.connect({port: {}})` and `net.connect({port: []})`
+  // throw ERR_INVALID_ARG_TYPE.
+  if (
+    t.isObjectExpression(value) ||
+    t.isArrayExpression(value) ||
+    t.isRegExpLiteral(value) ||
+    t.isArrowFunctionExpression(value) ||
+    t.isFunctionExpression(value) ||
+    t.isClassExpression(value) ||
+    t.isUnaryExpression(value, { operator: "!" }) ||
+    t.isUnaryExpression(value, { operator: "typeof" })
+  )
+    return true;
   if (t.isStringLiteral(value))
     return value.value.length === 0 || !isUsablePortString(value.value);
   if (t.isTemplateLiteral(value) && value.expressions.length === 0) {
@@ -779,6 +793,12 @@ const hasOptionGetter = (options: t.ObjectExpression): boolean =>
     (property) => t.isObjectMethod(property) && property.kind === "get",
   );
 
+/** Whether an options object carries a setter `Object.assign` invokes on the merge target. */
+const hasOptionSetter = (options: t.ObjectExpression): boolean =>
+  options.properties.some(
+    (property) => t.isObjectMethod(property) && property.kind === "set",
+  );
+
 /**
  * Whether a single options object provably throws before a socket exists.
  *
@@ -796,6 +816,15 @@ const optionsPortRejects = (
   context: DataEffectTraversalContext,
 ): boolean => {
   if (hasOptionGetter(options)) return false;
+  // A supplied `socket` makes TLS wrap that stream instead of connecting, so the port is
+  // never read. Measured on Node 24.22.1,
+  // `tls.connect({socket: new net.Socket(), port: -1})` returns a TLSSocket.
+  const socketMember = staticObjectProperty(
+    options,
+    "socket",
+    isNullishJavaScriptSyntax,
+  );
+  if (socketMember.status !== "missing") return false;
   const selection = socketPathSelection(options, context);
   if (selection === "selected" || selection === "unknown") return false;
   if (selection === "invalid") return true;
@@ -862,6 +891,10 @@ const rejectsSocketPortLiteral = (
     // time and can rewrite what the later object writes. Measured on Node 24.22.1,
     // `tls.connect({get side() { this.port = 80; }, port: 443}, {port: -1})` connects.
     if (target !== undefined && hasOptionGetter(target)) return false;
+    // `Object.assign` invokes setters on its first argument, so a target setter can write
+    // the path or port before the copy finishes. Measured on Node 24.22.1,
+    // `tls.connect({set port(_) { this.path = "/tmp/x"; }}, {port: -1})` connects.
+    if (target !== undefined && hasOptionSetter(target)) return false;
     if (source !== undefined && t.isObjectExpression(source)) {
       // A later object replaces a member it writes, so its own members decide first.
       if (hasOptionGetter(source)) return false;
@@ -870,12 +903,14 @@ const rejectsSocketPortLiteral = (
       if (sourcePath === "invalid") return true;
       if (sourcePath === "missing") {
         // The later object omits `path`, so the target keeps its own and the merged
-        // result can still be a Unix socket.
-        if (
-          target !== undefined &&
-          socketPathSelection(target, context) === "selected"
-        )
-          return false;
+        // result can still be a Unix socket. A path this reader cannot resolve may be a
+        // real one: measured on Node 24.22.1,
+        // `const p = "/tmp/x"; tls.connect({path: p}, {port: -1})` connects.
+        const targetPath =
+          target === undefined
+            ? "missing"
+            : socketPathSelection(target, context);
+        if (targetPath === "selected" || targetPath === "unknown") return false;
       } else if (sourcePath !== "ignored") return false;
       const sourcePort = staticObjectProperty(
         source,
@@ -910,6 +945,7 @@ const rejectsSocketPortLiteral = (
     if (second === undefined || t.isSpreadElement(second)) return true;
     const options = unwrapJavaScriptExpression(second).node;
     if (!t.isObjectExpression(options)) return true;
+    if (hasOptionGetter(options) || hasOptionSetter(options)) return false;
     const selection = socketPathSelection(options, context);
     if (selection === "selected") return false;
     if (selection === "invalid") return true;
