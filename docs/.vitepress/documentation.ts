@@ -479,6 +479,11 @@ export const documentationSections = [
         route: "/axml",
       },
       {
+        text: "Android compiled resources (arsc)",
+        source: "arsc.md",
+        route: "/arsc",
+      },
+      {
         text: "Binary hardening",
         source: "binary-hardening.md",
         route: "/binary-hardening",

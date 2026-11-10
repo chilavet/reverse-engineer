@@ -33,6 +33,7 @@ type FormatsWithReaders =
   | "unityfs"
   | "wxapkg"
   | "axml"
+  | "arsc"
   | "uimage"
   | "mach-o-universal"
   | "directory"

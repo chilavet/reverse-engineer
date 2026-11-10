@@ -85,6 +85,7 @@ import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
 import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasAxmlHeader } from "../domain/axmlFormat.js";
+import { hasArscHeader } from "../domain/arscFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import {
   hasWxapkgEncryptedMagic,
@@ -784,6 +785,7 @@ const detectArtifactFormat = async (
   if (hasUnityFsHeader(magic)) return "unityfs";
   if (hasWxapkgEncryptedMagic(magic) || hasWxapkgHeader(magic)) return "wxapkg";
   if (hasAxmlHeader(magic)) return "axml";
+  if (hasArscHeader(magic)) return "arsc";
   if (hasUImageMagic(magic)) return "uimage";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
@@ -892,6 +894,7 @@ const isArchiveFormat = (
     "unityfs",
     "wxapkg",
     "axml",
+    "arsc",
     "uimage",
     "dmg",
     "pkg",
