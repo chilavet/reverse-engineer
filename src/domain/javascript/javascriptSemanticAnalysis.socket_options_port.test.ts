@@ -132,3 +132,23 @@ it.each([
     expect(acquisitionsFor(call)).toEqual([]);
   },
 );
+
+it.each([
+  // `net` ignores a `socket` member and still validates the port.
+  [`net.connect({ socket: new net.Socket(), port: -1 })`],
+  // A falsy `socket` is not a stream, so TLS falls through to the port.
+  [`tls.connect({ socket: false, port: -1 })`],
+  [`tls.connect({ socket: null, port: -1 })`],
+] as const)(
+  "emits no acquisition when the socket is not a wrapped stream: %s",
+  (call) => {
+    expect(acquisitionsFor(call)).toEqual([]);
+  },
+);
+
+it("keeps the acquisition for a wrapped stream", () => {
+  // TLS wraps the supplied stream instead of connecting, so the port is never read.
+  expect(
+    acquisitionsFor(`tls.connect({ socket: new net.Socket(), port: -1 })`),
+  ).toHaveLength(1);
+});

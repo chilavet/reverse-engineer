@@ -793,6 +793,31 @@ const hasOptionGetter = (options: t.ObjectExpression): boolean =>
     (property) => t.isObjectMethod(property) && property.kind === "get",
   );
 
+/**
+ * Whether the options make TLS wrap a supplied, usable stream instead of connecting.
+ *
+ * The member has to be truthy for Node to treat it as a stream. Measured on Node 24.22.1,
+ * `tls.connect({socket: new net.Socket(), port: -1})` creates a socket while
+ * `{socket: false, port: -1}` and `{socket: null, port: -1}` both throw
+ * `ERR_SOCKET_BAD_PORT`.
+ */
+const wrapsSuppliedSocket = (
+  options: t.ObjectExpression,
+  context: DataEffectTraversalContext,
+): boolean => {
+  const written = writtenOptionMember(options, "socket");
+  if (written === undefined) return false;
+  const value = unwrapJavaScriptExpression(written).node;
+  if (isNullishJavaScriptSyntax(value)) return false;
+  if (
+    isUnmodifiedGlobalReference(value, context.state, "undefined") ||
+    t.isBooleanLiteral(value, { value: false }) ||
+    t.isNumericLiteral(value, { value: 0 })
+  )
+    return false;
+  return true;
+};
+
 /** Whether an options object carries a setter `Object.assign` invokes on the merge target. */
 const hasOptionSetter = (options: t.ObjectExpression): boolean =>
   options.properties.some(
@@ -814,17 +839,19 @@ const hasOptionSetter = (options: t.ObjectExpression): boolean =>
 const optionsPortRejects = (
   options: t.ObjectExpression,
   context: DataEffectTraversalContext,
+  specifier: string,
 ): boolean => {
   if (hasOptionGetter(options)) return false;
-  // A supplied `socket` makes TLS wrap that stream instead of connecting, so the port is
-  // never read. Measured on Node 24.22.1,
-  // `tls.connect({socket: new net.Socket(), port: -1})` returns a TLSSocket.
-  const socketMember = staticObjectProperty(
-    options,
-    "socket",
-    isNullishJavaScriptSyntax,
-  );
-  if (socketMember.status !== "missing") return false;
+  // A supplied, usable `socket` makes TLS wrap that stream instead of connecting, so the
+  // port is never read. Only `tls` reads this member, and only a truthy value is a stream.
+  // Measured on Node 24.22.1:
+  //
+  //   tls.connect({socket: new net.Socket(), port: -1})  -> socket created
+  //   tls.connect({socket: false, port: -1})             -> THREW ERR_SOCKET_BAD_PORT
+  //   tls.connect({socket: null, port: -1})              -> THREW ERR_SOCKET_BAD_PORT
+  //   net.connect({socket: new net.Socket(), port: -1})  -> THREW, `net` ignores the member
+  if (specifier === "tls" && wrapsSuppliedSocket(options, context))
+    return false;
   const selection = socketPathSelection(options, context);
   if (selection === "selected" || selection === "unknown") return false;
   if (selection === "invalid") return true;
@@ -882,7 +909,8 @@ const rejectsSocketPortLiteral = (
   if (port === undefined || t.isSpreadElement(port)) return false;
   const value = unwrapJavaScriptExpression(port).node;
   if (t.isObjectExpression(value)) {
-    if (specifier !== "tls") return optionsPortRejects(value, context);
+    if (specifier !== "tls")
+      return optionsPortRejects(value, context, specifier);
     const merge = tlsOptionMerge(node, context.state);
     if (merge === undefined || merge.target === "unknown") return false;
     const target = merge.target === "fresh" ? undefined : merge.target;
@@ -927,7 +955,9 @@ const rejectsSocketPortLiteral = (
       // A source this reader cannot read may carry any member, so the merge is open.
       return false;
     }
-    return target === undefined ? false : optionsPortRejects(target, context);
+    return target === undefined
+      ? false
+      : optionsPortRejects(target, context, specifier);
   }
   // A string in the positional slot is a Unix path, not a port, so only an empty one can
   // fail here: measured on Node 24.22.1, `tls.connect("/tmp/x.sock")` connects while
