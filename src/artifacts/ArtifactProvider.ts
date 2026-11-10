@@ -262,6 +262,7 @@ class ArtifactClient implements AnalysisClient {
                 : { signal: options.signal }),
             }),
           options?.signal,
+          this.environment,
         );
         return ok(
           createAnalysisExecution(result, ARTIFACT_GRAPH_PROVIDER, {
@@ -308,6 +309,7 @@ class ArtifactClient implements AnalysisClient {
                     : { signal: options.signal }),
                 }),
               options?.signal,
+              this.environment,
             );
         return ok(
           createAnalysisExecution(result, ARTIFACT_GRAPH_PROVIDER, {
@@ -449,6 +451,7 @@ class ArtifactClient implements AnalysisClient {
           ...(options?.signal === undefined ? {} : { signal: options.signal }),
         }),
       options?.signal,
+      this.environment,
     );
     return ok(
       createAnalysisExecution(result, ARTIFACT_GRAPH_PROVIDER, {
