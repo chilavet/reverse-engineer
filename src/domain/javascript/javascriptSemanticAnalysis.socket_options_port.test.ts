@@ -133,6 +133,16 @@ it.each([
   },
 );
 
+it("keeps the acquisition when a shadowed undefined is not the global value", () => {
+  // A binding named `undefined` is not the global, so assigning it cannot clear
+  // the target's Unix socket path and the port still has to decide.
+  expect(
+    acquisitionsFor(
+      `(function (undefined) { return tls.connect({ path: "/tmp/x" }, { path: undefined, port: -1 }); })("x")`,
+    ),
+  ).toHaveLength(1);
+});
+
 it.each([
   // `net` ignores a `socket` member and still validates the port.
   [`net.connect({ socket: new net.Socket(), port: -1 })`],
