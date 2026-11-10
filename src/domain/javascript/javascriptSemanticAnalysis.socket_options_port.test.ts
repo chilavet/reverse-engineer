@@ -94,3 +94,41 @@ it.each([
 ] as const)("emits no acquisition for a decided bad port: %s", (call) => {
   expect(acquisitionsFor(call)).toEqual([]);
 });
+
+it.each([
+  // Node reads `path` only when it is truthy, so a falsy non-string falls back to the port.
+  [`net.connect({ path: false, port: 80 })`],
+  [`net.connect({ path: 0, port: 80 })`],
+  [`net.connect({ path: 0n, port: 80 })`],
+] as const)("keeps the acquisition for a falsy path: %s", (call) => {
+  expect(acquisitionsFor(call)).toHaveLength(1);
+});
+
+it("emits no acquisition for a truthy non-string path", () => {
+  expect(acquisitionsFor(`net.connect({ path: true, port: 80 })`)).toEqual([]);
+});
+
+it.each([
+  // An omitted `path` leaves the target one in place, so the Unix socket still wins.
+  [`tls.connect({ path: "/tmp/x" }, { port: -1 })`],
+  // A getter on the merge target runs again and can rewrite what the source writes.
+  [`tls.connect({ get side() { this.port = 80; }, port: 443 }, { port: -1 })`],
+  // A class in slot 2 carries enumerable static fields that the merge copies.
+  [`tls.connect({ port: -1 }, null, class { static port = 443 })`],
+] as const)("keeps the acquisition for a merged override: %s", (call) => {
+  expect(acquisitionsFor(call)).toHaveLength(1);
+});
+
+it.each([
+  // An explicit nullish or empty override clears the target's path.
+  [`tls.connect({ path: "/tmp/x" }, { path: null, port: -1 })`],
+  [`tls.connect({ path: "/tmp/x" }, { path: "", port: -1 })`],
+  [`tls.connect({ path: "/tmp/x" }, { path: undefined, port: -1 })`],
+  // A class in slot 1 is not an options object, so the target still decides.
+  [`tls.connect({ port: -1 }, class { static port = 443 })`],
+] as const)(
+  "emits no acquisition for a cleared path or a non-options class: %s",
+  (call) => {
+    expect(acquisitionsFor(call)).toEqual([]);
+  },
+);

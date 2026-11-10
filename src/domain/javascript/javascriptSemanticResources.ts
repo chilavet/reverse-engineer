@@ -14,6 +14,7 @@ import {
   isObjectPrototypeSetter,
   primitiveOwnKeys,
   readExactJavaScriptLiteral,
+  semanticStaticPropertyKey,
   semanticStaticPropertyName,
   staticJavaScriptTruthiness,
   staticObjectCopyPropertyReader,
@@ -657,7 +658,43 @@ const rejectsPortValue = (
  * | `""` or `null`, with `port: -1` | THREW `ERR_SOCKET_BAD_PORT` |
  * | `true`, with `port: 80` | THREW `ERR_INVALID_ARG_TYPE` |
  */
-type SocketPathSelection = "selected" | "ignored" | "invalid" | "unknown";
+type SocketPathSelection =
+  | "selected"
+  | "ignored"
+  | "missing"
+  | "invalid"
+  | "unknown";
+
+/** The last value node an object literal writes for a member, if any. */
+const writtenOptionMember = (
+  options: t.ObjectExpression,
+  member: string,
+): t.Node | undefined => {
+  let written: t.Node | undefined;
+  for (const property of options.properties) {
+    if (t.isSpreadElement(property)) continue;
+    if (semanticStaticPropertyKey(property.key, property.computed) !== member)
+      continue;
+    written = t.isObjectProperty(property) ? property.value : undefined;
+  }
+  return written;
+};
+
+/**
+ * Whether an object literal writes a member at all, including with a nullish value.
+ *
+ * The shared property reader reports a nullish value as absent, which is right for reading a
+ * value but wrong for deciding whether a merge override happened.
+ */
+const hasOwnOptionMember = (
+  options: t.ObjectExpression,
+  member: string,
+): boolean =>
+  options.properties.some(
+    (property) =>
+      !t.isSpreadElement(property) &&
+      semanticStaticPropertyKey(property.key, property.computed) === member,
+  );
 
 /** Classify an options object's `path` member without conflating its states. */
 const socketPathSelection = (
@@ -669,10 +706,35 @@ const socketPathSelection = (
     "path",
     isNullishJavaScriptSyntax,
   );
-  if (lookup.status === "missing") return "ignored";
-  if (lookup.status !== "explicit") return "unknown";
+  // An absent member leaves whatever the target already had, which is a different state
+  // from an explicit falsy override: `Object.assign` copies own keys including
+  // `undefined`. Measured on Node 24.22.1, `tls.connect({path: "/tmp/x"},
+  // {port: -1})` connects while `{path: "/tmp/x"}, {path: undefined, port: -1}` throws.
+  if (lookup.status === "missing")
+    // The shared reader treats a nullish value as absent, but an own key carrying
+    // `undefined` still overrides the merge target. Measured on Node 24.22.1,
+    // `tls.connect({path: "/tmp/x"}, {path: undefined, port: -1})` throws.
+    return hasOwnOptionMember(options, "path") ? "ignored" : "missing";
+  if (lookup.status !== "explicit")
+    // An own key whose value the shared reader cannot price is still an override. Read the
+    // written node from the property list so an unmodified `undefined` identifier is
+    // recognised as a nullish override rather than an unknown one.
+    return writtenOptionMember(options, "path") === undefined ||
+      !isUnmodifiedGlobalReference(
+        unwrapJavaScriptExpression(writtenOptionMember(options, "path")!).node,
+        context.state,
+        "undefined",
+      )
+      ? "unknown"
+      : "ignored";
   const value = unwrapJavaScriptExpression(lookup.value).node;
-  if (isNullishJavaScriptSyntax(value)) return "ignored";
+  // A nullish value is an explicit override that leaves no path. `undefined` is an
+  // identifier rather than a null literal, so the shared global test decides it too.
+  if (
+    isNullishJavaScriptSyntax(value) ||
+    isUnmodifiedGlobalReference(value, context.state, "undefined")
+  )
+    return "ignored";
   if (t.isStringLiteral(value))
     return value.value.length === 0 ? "ignored" : "selected";
   if (t.isTemplateLiteral(value) && value.expressions.length === 0) {
@@ -680,6 +742,14 @@ const socketPathSelection = (
     if (cooked === null || cooked === undefined) return "unknown";
     return cooked.length === 0 ? "ignored" : "selected";
   }
+  // Node reads `path` only when it is truthy, so a known falsy non-string falls back to
+  // the port instead of throwing. Measured on Node 24.22.1, `{path: false, port: 80}`,
+  // `{path: 0, port: 80}` and `{path: 0n, port: 80}` all connect, while
+  // `{path: true, port: 80}` throws ERR_INVALID_ARG_TYPE.
+  if (t.isBooleanLiteral(value) && !value.value) return "ignored";
+  if (t.isNumericLiteral(value) && value.value === 0) return "ignored";
+  if (t.isBigIntLiteral(value) && /^0n?$/u.test(String(value.value)))
+    return "ignored";
   // Any other known value is not a path, so Node refuses it before connecting.
   if (
     t.isBooleanLiteral(value) ||
@@ -750,8 +820,10 @@ const carriesNoOptionMembers = (value: t.Node): boolean =>
   t.isStringLiteral(value) ||
   t.isRegExpLiteral(value) ||
   t.isArrowFunctionExpression(value) ||
-  t.isFunctionExpression(value) ||
-  t.isClassExpression(value);
+  t.isFunctionExpression(value);
+// A class expression is deliberately absent: its public static fields are enumerable
+// and `Object.assign` copies them. Measured on Node 24.22.1,
+// `tls.connect({port: -1}, null, class { static port = 443 })` connects.
 
 /**
  * Whether a `net`/`tls` acquisition provably throws before a socket exists.
@@ -786,13 +858,25 @@ const rejectsSocketPortLiteral = (
     if (merge === undefined || merge.target === "unknown") return false;
     const target = merge.target === "fresh" ? undefined : merge.target;
     const source = merge.source;
+    // The first object is spread again as the merge target, so its getters run a second
+    // time and can rewrite what the later object writes. Measured on Node 24.22.1,
+    // `tls.connect({get side() { this.port = 80; }, port: 443}, {port: -1})` connects.
+    if (target !== undefined && hasOptionGetter(target)) return false;
     if (source !== undefined && t.isObjectExpression(source)) {
       // A later object replaces a member it writes, so its own members decide first.
       if (hasOptionGetter(source)) return false;
       const sourcePath = socketPathSelection(source, context);
       if (sourcePath === "selected") return false;
       if (sourcePath === "invalid") return true;
-      if (sourcePath !== "ignored") return false;
+      if (sourcePath === "missing") {
+        // The later object omits `path`, so the target keeps its own and the merged
+        // result can still be a Unix socket.
+        if (
+          target !== undefined &&
+          socketPathSelection(target, context) === "selected"
+        )
+          return false;
+      } else if (sourcePath !== "ignored") return false;
       const sourcePort = staticObjectProperty(
         source,
         "port",
@@ -829,7 +913,7 @@ const rejectsSocketPortLiteral = (
     const selection = socketPathSelection(options, context);
     if (selection === "selected") return false;
     if (selection === "invalid") return true;
-    if (selection !== "ignored") return false;
+    if (selection !== "ignored" && selection !== "missing") return false;
     const lookup = staticObjectProperty(
       options,
       "port",
