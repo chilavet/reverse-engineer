@@ -37,6 +37,14 @@ export interface JavaScriptModuleRange {
   readonly requireName: string | null;
 }
 
+/** Per-file work and representation budget for contextBridge member enumeration. */
+export interface ContextBridgeMemberBudget {
+  remainingVisits: number;
+  remainingBytes: number;
+  truncated: boolean;
+  readonly seenNodes: WeakSet<t.Node>;
+}
+
 /** Static finding retained with its source offset until module attribution. */
 export interface LocatedJavaScriptFinding<Value> {
   readonly offset: number;
@@ -87,6 +95,11 @@ export interface JavaScriptAnalysisAccumulator {
     readonly constructor: ElectronWindowConstructor;
   }[];
   readonly contextBridgeApis: LocatedJavaScriptFinding<ElectronContextBridgeFinding>[];
+  readonly pendingContextBridgeApis: (
+    | t.CallExpression
+    | t.OptionalCallExpression
+  )[];
+  contextBridgeMemberBudget?: ContextBridgeMemberBudget;
   readonly ipc: LocatedJavaScriptFinding<ElectronIpcFinding>[];
   readonly senderValidations: LocatedJavaScriptFinding<ElectronSenderValidationFinding>[];
   readonly utilityProcesses: LocatedJavaScriptFinding<ElectronUtilityProcessFinding>[];
@@ -198,6 +211,7 @@ export const createJavaScriptAnalysisAccumulator = (
   browserWindows: [],
   pendingBrowserWindows: [],
   contextBridgeApis: [],
+  pendingContextBridgeApis: [],
   ipc: [],
   senderValidations: [],
   utilityProcesses: [],
