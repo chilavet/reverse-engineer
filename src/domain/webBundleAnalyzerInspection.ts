@@ -70,6 +70,7 @@ export const analyzeScript = (
     indexJavaScriptBindingsWithReceiversSteps(
       file.program,
       undefined,
+      "import",
       precision,
     ),
   );
